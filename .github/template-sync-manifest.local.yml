@@ -1,0 +1,5 @@
+# This repo's own files, which template-base's manifest can't know about;
+# read by the template-sync-manifest check only, never by sync.
+ignore:
+  - profile/
+  - brand/
