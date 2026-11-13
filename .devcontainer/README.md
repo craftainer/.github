@@ -1,14 +1,28 @@
 # .devcontainer/
 
-- `devcontainer.json` — references `compose.yml` as the devcontainer's
-  sole `dockerComposeFile`, and configures the devcontainer itself
+- `devcontainer.json` — references `compose.yml` and `compose.instance.yml`
+  as the devcontainer's `dockerComposeFile`, and configures the devcontainer itself
   (features, mounts, editor settings).
-- `compose.yml` — the dev service (`app`), built from the top-level
-  `Dockerfile`'s `develop` stage. An instance that needs backing services
+- `Dockerfile` — the devcontainer image (a single `develop` stage), built
+  with the repo root as context; `Dockerfile.dockerignore` holds its
+  build-context excludes. Its `FROM` and `# syntax=` lines are pinned by
+  digest, written literally so Renovate can update tag and digest
+  together. The top-level `Dockerfile` is reserved for an
+  instance's runtime image (`../docs/TEMPLATE.md`).
+- `compose.yml` — the dev service (`myapp`), built from `Dockerfile`'s
+  `develop` stage. An instance that needs backing services
   (a database, a queue, ...) adds its own `stack/` directory (one
   subdirectory per service, each with its own compose fragment) and an
-  `include:` list here pointing at them — see `stack/README.md`'s
+  `include:` list in `compose.instance.yml` pointing at them — see `stack/README.md`'s
   "Devcontainer stack pattern" convention once an instance adds one.
+  It also declares the optional `github_token` build secret (from the
+  `GITHUB_TOKEN` environment variable, which CI exports) that
+  authenticates `../scripts/develop.sh`'s downloads; unset locally, it is
+  simply absent. Its `environment:` sets `CLAUDE_CONFIG_DIR` to the
+  `claude-config` volume's mount path (see "Do").
+- `compose.instance.yml` — instance-owned stub (`ignore` tier, never
+  touched by sync): an instance's `include:` list and extra `services.myapp`
+  settings. See `docs/TEMPLATE.md`'s "Instance extension points".
 
 ## Docker-in-Docker vs. the host's Docker
 
@@ -116,7 +130,7 @@ step there. Still worth doing once the container is back:
 
 - Run `prek run --all-files --hook-stage manual` — the same check-suite
   that gates CI (`checks.yml`) — to confirm whatever motivated the
-  rebuild (a `Dockerfile`/`scripts/develop.sh` change, a new tool) works
+  rebuild (a `.devcontainer/Dockerfile`/`scripts/develop.sh` change, a new tool) works
   end-to-end inside the container, not just that the image built.
 - If the change added, removed, or reordered a `mounts` entry, confirm
   it actually took effect — mounts apply only at container creation, not
@@ -126,12 +140,12 @@ step there. Still worth doing once the container is back:
   picked up the new list.
 
 A plain "Reopen in Container" (no rebuild) is enough for changes outside
-`.devcontainer/`, `Dockerfile`, and `scripts/develop.sh` — those only
+`.devcontainer/` and `scripts/develop.sh` — those only
 need the window reconnected, not a fresh image.
 
 ## Do
 
-- Add a new compose fragment's path to `compose.yml`'s own `include:`
+- Add a new compose fragment's path to `compose.instance.yml`'s `include:`
   list the same time you add the fragment — an unreferenced file starts
   nothing.
 - Keep service credentials and connection settings in the compose files'
@@ -140,18 +154,34 @@ need the window reconnected, not a fresh image.
 - Commit `devcontainer-lock.json` in the same change as any feature
   edit in `devcontainer.json`. Regenerate it with
   `npx @devcontainers/cli upgrade --workspace-folder .`, or by
-  rebuilding the devcontainer. Renovate bumps feature versions but
-  never regenerates this file, so its feature-bump PRs fail the
-  `devcontainer-lock` check (and don't automerge) until someone
-  pushes the regenerated lockfile to the Renovate branch.
+  rebuilding the devcontainer. Feature versions are bumped by hand,
+  not by Renovate: Renovate can't regenerate this file, so
+  `../.github/renovate.json` turns its devcontainer feature updates
+  off rather than let them merge with a stale lockfile.
+- Change `CLAUDE_CONFIG_DIR` (`compose.yml`'s `services.myapp`
+  `environment:`), `claude-config`'s mount path and the
+  `/home/vscode/.claude` paths in `../scripts/develop.sh` together.
+  develop.sh creates that directory owned by `vscode` at mode 0700, so a
+  fresh volume starts out writable by Claude Code. The
+  variable points Claude Code at the volume for all its state. Without
+  it, Claude Code keeps `.claude.json` (account, MCP servers,
+  per-project trust) at `~/.claude.json`, outside the volume, so a
+  rebuild loses it and first-launch setup runs again. See Claude Code's
+  [dev container docs](https://code.claude.com/docs/en/devcontainer#persist-authentication-and-settings-across-rebuilds).
+  The variable, or a new mount path, takes effect only on a full
+  rebuild, and that first rebuild still starts without `.claude.json`.
+  To keep it, quit Claude Code and run
+  `cp ~/.claude.json ~/.claude/.claude.json` (into the volume) as the
+  last step before rebuilding, or sign in once more afterwards.
 
 ## Don't
 
 - Bind- or volume-mount a language runtime's dependency tree, or anything
   else you don't want a host antivirus/DLP tool scanning or syncing — it
   lives purely in the container's writable layer instead. (`claude-config`
-  is a deliberate, narrow exception — see `compose.yml`'s comment on that
-  volume.)
+  and `gh-config` are deliberate, narrow exceptions — small login and
+  session state, including Claude Code's `.claude.json`; see
+  `compose.yml`'s comments on those volumes.)
 - Add a `ports:` mapping or a `networks:` block anywhere here.
 - Pin a feature or image version as `latest` — pin the exact version so
   Renovate can bump it deliberately.
