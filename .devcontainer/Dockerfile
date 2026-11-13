@@ -8,7 +8,7 @@
 ARG PREK_VERSION=0.5.10
 
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.319
+ARG CLAUDE_CODE_VERSION=2.1.322
 
 # renovate: datasource=github-releases depName=edouard-claude/snip
 ARG SNIP_VERSION=0.26.0
@@ -35,7 +35,7 @@ ARG PYTHON_VERSION=3.14.8
 # (the clear-thought MCP server in .mcp.json) is the only thing that
 # needs it.
 # renovate: datasource=node-version depName=node
-ARG NODE_VERSION=24.22.2
+ARG NODE_VERSION=24.22.3
 
 ARG SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ARG SSL_CERT_DIR=/etc/ssl/certs
