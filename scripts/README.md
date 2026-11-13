@@ -1,20 +1,41 @@
 # scripts/
 
-- `develop.sh` — the Dockerfile's `develop`-stage setup: installs `prek`,
-  the Claude Code CLI, and `snip`, the only tooling this template requires
+- `develop.sh` — `../.devcontainer/Dockerfile`'s `develop`-stage setup: installs `prek`,
+  the Claude Code CLI, `snip` and the GitHub CLI (`gh`), the only tooling this template requires
   regardless of instance language. An instance adds its own language
   runtime/tooling install on top, either by extending this script or
-  copying its shape into a second one invoked from the instance's own
-  `Dockerfile` layer.
+  copying its shape into a second script. Prefer the hook below over
+  either. Every download goes through its `fetch` helper (bounded curl
+  retries with backoff; GitHub URLs authenticated when the optional
+  `github_token` BuildKit secret is present) and the one tool that
+  downloads for itself (`uv python install`) runs through `retry` (never
+  around a `fetch`, so the two layers of retries do not multiply; a failed
+  download names what failed and the URL before the script aborts, and
+  `fetch` itself retries DNS and
+  connect failures (curl exit 6/7) and truncated transfers (18/52/55/56) up
+  to 4 times; timeouts are left to curl's own `--retry`), so CI's shared-IP
+  HTTP 429s don't fail the image build. Local builds need no token.
+  No vendor install script is run: `uv` and `prek` are release tarballs
+  checked against the `.sha256` published beside them (`fetch_checked`),
+  and Claude Code's binary is checked against its GPG-signed
+  `manifest.json` (key fingerprint pinned in `claude_signing_fpr`); see
+  `../docs/TEMPLATE.md`'s "Supply chain and release hardening".
+- `post-create.sh` — the devcontainer's `postCreateCommand`: git
+  `safe.directory`, `prek install`, then every `post-create.d/*.sh`.
+- `develop.d/`, `post-create.d/` — instance hook directories, empty apart
+  from their own `README.md`; see `docs/TEMPLATE.md`'s "Instance extension
+  points".
 
 ## Do
 
+- Pass a token to the build as a BuildKit secret (`github_token`), never
+  a `--build-arg`/`ARG`: an ARG is baked into the image history.
 - Keep this script's own tools pinned to an exact version (a `# renovate:`
-  ARG in the Dockerfile) and checksum-verified where the upstream project
+  ARG in `../.devcontainer/Dockerfile`) and checksum-verified where the upstream project
   publishes checksums, matching the pattern each install step here already
   follows.
 
 ## Don't
 
 - Add a language runtime or stack-specific tool here — that belongs in the
-  instance's own layer, not the base template's.
+  instance's own layer (`develop.d/`), not the base template's.
