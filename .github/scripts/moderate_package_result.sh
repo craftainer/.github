@@ -32,6 +32,12 @@ case "$mode" in build | triage) ;; *)
 esac
 [[ "${GITHUB_ISSUE_NUMBER:-}" =~ ^[0-9]+$ ]] || { echo "::error::GITHUB_ISSUE_NUMBER is not numeric" >&2; exit 1; }
 
+# A repository-location variable inherited from the caller (a git hook exports
+# them) would make the `git init --bare` below re-initialise the caller's own
+# repository instead of the scratch one. Commit identity variables are kept.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE GIT_PREFIX
+
 mkdir -p "$out_dir"
 safe="$(mktemp -d)"
 trap 'rm -rf "$safe"' EXIT
@@ -87,11 +93,22 @@ if [ "$mode" = build ]; then
 else
   action=failed
   comment=""
+  # A patch over the cap is the one reason worth naming: apply_triage posts a
+  # failed result's comment, so the maintainer learns why instead of seeing the
+  # generic "no usable result" note.
+  if [ "$too_large" = 1 ]; then
+    comment="$(size_limit_reason)"
+  fi
   result="$workspace/.moderation-out/triage.json"
   if [ "$too_large" = 0 ] && agent_file "$result" "$workspace" \
     && jq -e '(.action | type == "string") and (.comment | type == "string")' "$result" > /dev/null 2>&1; then
     action="$(jq -r '.action' "$result")"
     comment="$(jq -r '.comment[0:20000]' "$result")"
+    # `failed` is the packager's own word for "no usable result": an agent that
+    # reports it carries no comment, so only the reason above is ever posted.
+    if [ "$action" = failed ]; then
+      comment=""
+    fi
   fi
   jq -n \
     --arg issue "$GITHUB_ISSUE_NUMBER" \

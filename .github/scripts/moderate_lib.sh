@@ -12,6 +12,13 @@ MAX_PATCH_BYTES=2097152
 MAX_TEXT_CHARS=10000
 MAX_TITLE_CHARS=200
 
+# size_limit_reason: the one fixed sentence a packaged `failed` triage result may
+# carry. The apply step posts a failed result's comment only when it equals this
+# text, so nothing the agent wrote ever reaches the issue through that path.
+size_limit_reason() {
+  echo "The automated change is larger than the ${MAX_PATCH_BYTES}-byte limit for an unattended run."
+}
+
 # is_sha <value>: a full 40-character lowercase hex object name, nothing else
 # (so it can never be read as a git option).
 is_sha() {
@@ -20,11 +27,22 @@ is_sha() {
 
 # is_ancestor <sha> <ref-or-sha>: <sha> is the same commit as, or an ancestor
 # of, the second argument. Asks the compare API instead of local history, so a
-# shallow checkout and a long branch both work.
+# shallow checkout and a long branch both work. A failed API call (a 5xx, a
+# rate limit, a dropped connection) is retried up to three times, so a
+# transient error does not abandon an otherwise good result; an answer other
+# than ahead/identical (diverged, behind) is final and not retried, and a call
+# that keeps failing still refuses (fails closed). MODERATE_RETRY_DELAY is the
+# pause in seconds between attempts (default 2).
 is_ancestor() {
-  local status
-  status="$(gh api "repos/$GITHUB_REPOSITORY/compare/$1...$2" --jq .status)" || return 1
-  [ "$status" = ahead ] || [ "$status" = identical ]
+  local status attempt
+  for attempt in 1 2 3; do
+    if status="$(gh api "repos/$GITHUB_REPOSITORY/compare/$1...$2" --jq .status)"; then
+      [ "$status" = ahead ] || [ "$status" = identical ]
+      return
+    fi
+    [ "$attempt" = 3 ] || sleep "${MODERATE_RETRY_DELAY:-2}"
+  done
+  return 1
 }
 
 # check_result_tree <base>: every path that differs between <base> and HEAD in
