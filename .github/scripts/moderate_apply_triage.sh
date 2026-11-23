@@ -82,8 +82,15 @@ comment="$(jq -r --argjson n "$MAX_TEXT_CHARS" '(.comment // "") | .[0:$n] | gsu
 if ! [[ "$action" =~ ^[a-z-]{1,30}$ ]] || [ -z "${label_for[$action]+set}" ] || [ -z "$comment" ]; then
   # Includes "failed" (no usable result), an action not in the table and an
   # empty comment: nothing from the result is acted on.
+  # A "failed" result may carry the packaging step's own reason (a patch over
+  # the size cap), posted only when it is exactly that fixed sentence: the
+  # comment is otherwise the agent's free text, which is never echoed here.
+  note=""
+  if [ "$action" = failed ] && [ "$comment" = "$(size_limit_reason)" ]; then
+    note=" $comment"
+  fi
   gh issue edit "$issue_number" --add-label "needs-human" || true
-  gh issue comment "$issue_number" --body "Automated triage ended without a usable result. A maintainer needs to look at this issue."
+  gh issue comment "$issue_number" --body "Automated triage ended without a usable result.$note A maintainer needs to look at this issue."
   exit 0
 fi
 
